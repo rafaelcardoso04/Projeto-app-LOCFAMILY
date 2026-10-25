@@ -1,1 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loc Family</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  body { margin:0; padding:16px; font-family:sans-serif;
+         background:#2c4468; min-height:100vh; box-sizing:border-box; }
+  .card { background:#fff; border-radius:20px; padding:20px;
+          margin-bottom:16px; text-align:center; }
+  h1 { color:#2849c7; margin:0 0 4px; }
+  input, button { font-size:16px; padding:10px 14px; border-radius:10px;
+                  border:1px solid #ccc; }
+  button { background:#2849c7; color:#fff; border:0; }
+  #sair { background:#fde2e2; color:#c0392b; }
+  #mapa { height:380px; border-radius:16px; }
+  .pessoa { background:#f0faf2; border-left:4px solid #5cc46a;
+            border-radius:10px; padding:10px; margin-top:8px; text-align:left; }
+  .pessoa small { color:#777; }
+
+  .etiqueta { transform:translate(-50%, calc(-100% - 8px)); position:relative;
+              background:#2563eb; color:#fff; font:600 13px sans-serif;
+              padding:5px 10px; border-radius:8px; white-space:nowrap;
+              box-shadow:0 2px 6px rgba(0,0,0,.35); }
+  .etiqueta::after { content:''; position:absolute; left:50%; bottom:-6px;
+              transform:translateX(-50%); border:6px solid transparent;
+              border-top-color:#2563eb; border-bottom:0; }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>📍 Loc Family</h1>
+  <div>Quem está online agora</div>
+</div>
+
+<div class="card" id="telaEntrada">
+  <input id="nome" placeholder="Seu nome" maxlength="30">
+  <button id="entrar">Entrar</button>
+</div>
+
+<div id="telaApp" style="display:none">
+  <div class="card" style="background:#fdf3cf">
+    👤 Você entrou como: <b id="meuNomeTxt"></b><br><br>
+    <button id="sair">🚪 Sair</button>
+  </div>
+
+  <div class="card" style="padding:8px"><div id="mapa"></div></div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Família Online</h3>
+    <div id="total"></div>
+    <div id="lista"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+let socket = null, mapa = null, watchId = null, meuNome = "";
+const marcadores = {};
+let centralizou = false;
+
+function iniciarMapa() {
+  if (mapa) return;
+  mapa = L.map("mapa").setView([-15.78, -47.93], 4);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "© OpenStreetMap"
+  }).addTo(mapa);
+}
+
+function atualizarMarcador(nome, lat, lng) {
+  if (!marcadores[nome]) {
+    const el = document.createElement("div");
+    el.className = "etiqueta";
+    el.textContent = nome;
+    marcadores[nome] = L.marker([lat, lng], {
+      icon: L.divIcon({ html: el, className: "", iconSize: [0, 0] })
+    }).addTo(mapa);
+  } else {
+    marcadores[nome].setLatLng([lat, lng]);
+  }
+}
+
+function removerMarcador(nome) {
+  if (marcadores[nome]) { mapa.removeLayer(marcadores[nome]); delete marcadores[nome]; }
+}
+
+function entrar(nome) {
+  meuNome = nome;
+  localStorage.setItem("nome", nome);
+  document.getElementById("telaEntrada").style.display = "none";
+  document.getElementById("telaApp").style.display = "block";
+  document.getElementById("meuNomeTxt").textContent = nome;
+  iniciarMapa();
+  setTimeout(() => mapa.invalidateSize(), 100);
+
+  socket = io();
+  socket.on("connect", () => socket.emit("entrar", { nome }));
+
+  socket.on("lista", lista => {
+    document.getElementById("total").textContent = "Total: " + lista.length;
+    const box = document.getElementById("lista");
+    box.innerHTML = "";
+    lista.forEach(u => {
+      const d = document.createElement("div");
+      d.className = "pessoa";
+      d.innerHTML = "<b></b><br><small></small>";
+      d.querySelector("b").textContent = "🟢 " + u.nome;
+      d.querySelector("small").textContent = "Entrou às " + u.hora;
+      box.appendChild(d);
+    });
+  });
+
+  socket.on("posicoes", ps => ps.forEach(p => atualizarMarcador(p.nome, p.lat, p.lng)));
+  socket.on("localizacao", p => atualizarMarcador(p.nome, p.lat, p.lng));
+  socket.on("saiu", p => removerMarcador(p.nome));
+
+  if (!navigator.geolocation) { alert("Seu navegador não tem geolocalização."); return; }
+  watchId = navigator.geolocation.watchPosition(pos => {
+    const { latitude: lat, longitude: lng } = pos.coords;
+    atualizarMarcador(meuNome, lat, lng);
+    if (!centralizou) { mapa.setView([lat, lng], 16); centralizou = true; }
+    socket.emit("localizacao", { lat, lng });
+  }, err => alert("Erro de localização: " + err.message),
+  { enableHighAccuracy: true });
+}
+
+function sair() {
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  if (socket) socket.disconnect();
+  localStorage.removeItem("nome");
+  location.reload();
+}
+
+document.getElementById("entrar").onclick = () => {
+  const n = document.getElementById("nome").value.trim();
+  if (n) entrar(n);
+};
+document.getElementById("sair").onclick = sair;
+
+const salvo = localStorage.getItem("nome");
+if (salvo) entrar(salvo);
+</script>
+</body>
+</html>
+
 
